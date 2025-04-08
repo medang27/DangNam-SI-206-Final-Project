@@ -43,3 +43,12 @@ def get_existing_tmdb_ids():
     results = cur.fetchall()
     conn.close()
     return {row[0] for row in results}
+
+def fetch_popular_movies(page=1):
+    url = f"{BASE_URL}/movie/popular?api_key={API_KEY}&language=en-US&page={page}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()["results"]
+    else:
+        print("Error fetching popular movies:", response.text)
+        return []
