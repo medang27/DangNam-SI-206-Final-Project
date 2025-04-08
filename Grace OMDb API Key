@@ -4,8 +4,8 @@ import requests
 import sqlite3
 import time
 
-API_KEY = "845af1f7"
-BASE_URL = "https://www.omdbapi.com/?i=tt3896198&apikey=845af1f7"
+OMDB_API_KEY = "845af1f7"
+OMDB_URL = "https://www.omdbapi.com/?i=tt3896198&apikey=845af1f7"
 
 DB_NAME = "movieratings.db"
 
@@ -13,6 +13,7 @@ def create_db():
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
 
+    # Create movies table
     cur.execute('''
         CREATE TABLE IF NOT EXISTS movies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,6 +23,7 @@ def create_db():
         )
     ''')
 
+    # Create revenues table
     cur.execute('''
         CREATE TABLE IF NOT EXISTS revenues (
             movie_id INTEGER,
@@ -43,11 +45,8 @@ def get_existing_imdbIDs():
     return {row[0] for row in results}
 
 def fetch_omdb_data(imdb_id):
-    params = {
-        'i': imdb_id,
-        'apikey': API_KEY
-    }
-    response = requests.get(BASE_URL, params=params)
+    params = {'i': imdb_id, 'apikey': OMDB_API_KEY}
+    response = requests.get(OMDB_URL, params=params)
     if response.status_code == 200:
         data = response.json()
         if data.get("Response") == "True":
@@ -58,7 +57,7 @@ def fetch_omdb_data(imdb_id):
                 "imdb_rating": float(data.get("imdbRating", 0.0)),
                 "rt_rating": get_rotten_tomatoes_rating(data.get("Ratings", []))
             }
-    print(f"Failed to fetch data for IMDb ID {imdb_id}")
+    print(f"OMDb fetch failed for IMDb ID {imdb_id}")
     return None
 
 def get_rotten_tomatoes_rating(ratings_list):
@@ -71,17 +70,17 @@ def save_movie_to_db(movie_data):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
 
-    # Insert into movies table
+    # Save movie info to the movies table (if it doesn't already exist)
     cur.execute('''
         INSERT OR IGNORE INTO movies (title, release_date, imdbID)
         VALUES (?, ?, ?)
     ''', (movie_data["title"], movie_data["release_date"], movie_data["imdbID"]))
 
-    # Get movie_id
+    # Retrieve movie ID
     cur.execute("SELECT id FROM movies WHERE imdbID = ?", (movie_data["imdbID"],))
     movie_id = cur.fetchone()[0]
 
-    # Insert into revenues table
+    # Save revenue info (IMDb & RT ratings)
     cur.execute('''
         INSERT INTO revenues (movie_id, imdb_rating, rt_rating)
         VALUES (?, ?, ?)
@@ -91,24 +90,18 @@ def save_movie_to_db(movie_data):
     conn.close()
 
 def fetch_and_store_movies(imdb_ids):
+    create_db()
     existing_ids = get_existing_imdbIDs()
     for imdb_id in imdb_ids:
         if imdb_id not in existing_ids:
             data = fetch_omdb_data(imdb_id)
             if data:
                 save_movie_to_db(data)
-                print(f"Stored: {data['title']}")
-            time.sleep(1)  # Be respectful of API rate limits
+                print(f"Saved: {data['title']} ({imdb_id})")
+            time.sleep(1)
         else:
-            print(f"Already in DB: {imdb_id}")
+            print(f"Skipped: {imdb_id}")
 
-# Example IMDb IDs (can be extended or imported from TMDb)
-example_imdb_ids = [
-    "tt3896198",  # Guardians of the Galaxy Vol. 2
-    "tt4154796",  # Avengers: Endgame
-    "tt2488496"   # Star Wars: The Force Awakens
-]
-
-if __name__ == "__main__":
-    create_db()
-    fetch_and_store_movies(example_imdb_ids)
+# --- Example IMDb IDs for testing ---
+imdb_ids = ["tt3896198", "tt0848228", "tt0816692"]  # Replace with actual IMDb IDs
+fetch_and_store_movies(imdb_ids)
