@@ -1,1 +1,12 @@
-TMDB
+#work on TMDB code here
+
+import requests
+import sqlite3
+import time
+
+API_KEY = "e4d04998880c3bf739e025355c5327b9"
+READ_ACCESS_TOKEN = "your_read_access_token_here"  # Replace with actual
+HEADERS = {"Authorization": f"Bearer {READ_ACCESS_TOKEN}"}
+BASE_URL = "https://api.themoviedb.org/3"
+
+DB_NAME = "movies.db"
