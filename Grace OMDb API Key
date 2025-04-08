@@ -6,6 +6,7 @@ import time
 
 OMDB_API_KEY = "845af1f7"
 OMDB_URL = "https://www.omdbapi.com/?i=tt3896198&apikey=845af1f7"
+BASE_URL = "http://www.omdbapi.com/"
 
 DB_NAME = "movieratings.db"
 
@@ -44,6 +45,23 @@ def get_existing_imdbIDs():
     conn.close()
     return {row[0] for row in results}
 
+def get_rotten_tomatoes_rating(ratings_list):
+    print(f"Ratings Data: {ratings_list}")
+    
+    for rating in ratings_list:
+        if rating["Source"] == "Rotten Tomatoes":
+            # Extract the value and convert it into an integer
+            try:
+                rt_rating = int(rating["Value"].replace("%", ""))
+                print(f"Found Rotten Tomatoes rating: {rt_rating}")
+                return rt_rating
+            except ValueError:
+                print("Error parsing Rotten Tomatoes rating.")
+                return None
+    
+    print("No Rotten Tomatoes rating found.")
+    return None
+
 def fetch_omdb_data(imdb_id):
     params = {'i': imdb_id, 'apikey': OMDB_API_KEY}
     response = requests.get(OMDB_URL, params=params)
@@ -60,11 +78,7 @@ def fetch_omdb_data(imdb_id):
     print(f"OMDb fetch failed for IMDb ID {imdb_id}")
     return None
 
-def get_rotten_tomatoes_rating(ratings_list):
-    for rating in ratings_list:
-        if rating["Source"] == "Rotten Tomatoes":
-            return int(rating["Value"].replace("%", ""))
-    return None
+
 
 def save_movie_to_db(movie_data):
     conn = sqlite3.connect(DB_NAME)
