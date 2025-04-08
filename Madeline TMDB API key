@@ -44,13 +44,13 @@ def get_existing_tmdb_ids():
     conn.close()
     return {row[0] for row in results}
 
-def fetch_popular_movies(page=1):
-    url = f"{BASE_URL}/movie/popular?api_key={API_KEY}&language=en-US&page={page}"
+def fetch_highest_revenue_movies(page=1):
+    url = f"{BASE_URL}/discover/movie?api_key={API_KEY}&language=en-US&sort_by=revenue.desc&page={page}&vote_count.gte=100"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()["results"]
     else:
-        print("Error fetching popular movies:", response.text)
+        print("Error fetching highest revenue movies:", response.text)
         return []
     
 def get_movie_details(tmdb_id):
@@ -69,7 +69,8 @@ def store_movies(limit=25):
     page = 1
 
     while added_count < limit:
-        movies = fetch_popular_movies(page)
+        movies = fetch_highest_revenue_movies(page)
+
         if not movies:
             break
 
