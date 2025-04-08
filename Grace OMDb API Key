@@ -1,66 +1,42 @@
 # work on OMDb API code here
 
-import requests
+import json
 import sqlite3
+import requests
 import time
 
 OMDB_API_KEY = "845af1f7"
-OMDB_URL = "https://www.omdbapi.com/?i=tt3896198&apikey=845af1f7"
-BASE_URL = "http://www.omdbapi.com/"
-
+OMDB_URL = "https://www.omdbapi.com/"
 DB_NAME = "movieratings.db"
 
-def create_db():
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
+def get_json_content(cache_file):
+    ''' Helper function to load data from cache file '''
+    try:
+        with open(cache_file, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
-    # Create movies table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS movies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            release_date TEXT,
-            imdbID TEXT UNIQUE
-        )
-    ''')
+def save_json_content(data, cache_file):
+    ''' Helper function to save data to cache file '''
+    with open(cache_file, 'w') as f:
+        json.dump(data, f, indent=4)
 
-    # Create revenues table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS revenues (
-            movie_id INTEGER,
-            imdb_rating REAL,
-            rt_rating INTEGER,
-            FOREIGN KEY (movie_id) REFERENCES movies(id)
-        )
-    ''')
+def get_rotten_tomatoes_cache():
+    ''' Fetch Rotten Tomatoes ratings from cache '''
+    return get_json_content('rottentomatoes_cache.json')
 
-    conn.commit()
-    conn.close()
+def save_rotten_tomatoes_cache(data):
+    ''' Save Rotten Tomatoes ratings to cache '''
+    save_json_content(data, 'rottentomatoes_cache.json')
 
-def get_existing_imdbIDs():
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute("SELECT imdbID FROM movies")
-    results = cur.fetchall()
-    conn.close()
-    return {row[0] for row in results}
+def get_imdb_cache():
+    ''' Fetch IMDb ratings from cache '''
+    return get_json_content('imdb_cache.json')
 
-def get_rotten_tomatoes_rating(ratings_list):
-    print(f"Ratings Data: {ratings_list}")
-    
-    for rating in ratings_list:
-        if rating["Source"] == "Rotten Tomatoes":
-            # Extract the value and convert it into an integer
-            try:
-                rt_rating = int(rating["Value"].replace("%", ""))
-                print(f"Found Rotten Tomatoes rating: {rt_rating}")
-                return rt_rating
-            except ValueError:
-                print("Error parsing Rotten Tomatoes rating.")
-                return None
-    
-    print("No Rotten Tomatoes rating found.")
-    return None
+def save_imdb_cache(data):
+    ''' Save IMDb ratings to cache '''
+    save_json_content(data, 'imdb_cache.json')
 
 def fetch_omdb_data(imdb_id):
     params = {'i': imdb_id, 'apikey': OMDB_API_KEY}
@@ -78,25 +54,61 @@ def fetch_omdb_data(imdb_id):
     print(f"OMDb fetch failed for IMDb ID {imdb_id}")
     return None
 
+def get_rotten_tomatoes_rating(ratings_list):
+    ''' Get Rotten Tomatoes rating from ratings list '''
+    for rating in ratings_list:
+        if rating.get("Source") == "Rotten Tomatoes":
+            return int(rating.get("Value").replace("%", ""))
+    return None
 
+def get_imdb_rating(ratings_list):
+    ''' Get IMDb rating from ratings list '''
+    for rating in ratings_list:
+        if rating.get("Source") == "Internet Movie Database":
+            return float(rating.get("Value").replace("/10", ""))
+    return None
 
-def save_movie_to_db(movie_data):
+def create_db():
+    ''' Create SQLite tables '''
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
 
-    # Save movie info to the movies table (if it doesn't already exist)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS movies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            release_date TEXT,
+            imdbID TEXT UNIQUE
+        )
+    ''')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS ratings (
+            movie_id INTEGER,
+            imdb_rating REAL,
+            rt_rating INTEGER,
+            FOREIGN KEY (movie_id) REFERENCES movies(id)
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+def save_movie_to_db(movie_data):
+    ''' Save movie and ratings data to SQLite '''
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
     cur.execute('''
         INSERT OR IGNORE INTO movies (title, release_date, imdbID)
         VALUES (?, ?, ?)
     ''', (movie_data["title"], movie_data["release_date"], movie_data["imdbID"]))
 
-    # Retrieve movie ID
     cur.execute("SELECT id FROM movies WHERE imdbID = ?", (movie_data["imdbID"],))
     movie_id = cur.fetchone()[0]
 
-    # Save revenue info (IMDb & RT ratings)
     cur.execute('''
-        INSERT INTO revenues (movie_id, imdb_rating, rt_rating)
+        INSERT INTO ratings (movie_id, imdb_rating, rt_rating)
         VALUES (?, ?, ?)
     ''', (movie_id, movie_data["imdb_rating"], movie_data["rt_rating"]))
 
@@ -104,18 +116,15 @@ def save_movie_to_db(movie_data):
     conn.close()
 
 def fetch_and_store_movies(imdb_ids):
+    ''' Fetch and store movies from OMDb API, saving them in SQLite '''
     create_db()
-    existing_ids = get_existing_imdbIDs()
     for imdb_id in imdb_ids:
-        if imdb_id not in existing_ids:
-            data = fetch_omdb_data(imdb_id)
-            if data:
-                save_movie_to_db(data)
-                print(f"Saved: {data['title']} ({imdb_id})")
-            time.sleep(1)
-        else:
-            print(f"Skipped: {imdb_id}")
+        data = fetch_omdb_data(imdb_id)
+        if data:
+            save_movie_to_db(data)
+            print(f"Saved: {data['title']} ({imdb_id})")
+        time.sleep(1)
 
-# --- Example IMDb IDs for testing ---
-imdb_ids = ["tt3896198", "tt0848228", "tt0816692"]  # Replace with actual IMDb IDs
+# Example IMDb IDs for testing
+imdb_ids = ["tt3896198", "tt0848228", "tt0816692"]
 fetch_and_store_movies(imdb_ids)
