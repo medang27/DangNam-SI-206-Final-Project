@@ -9,35 +9,36 @@ OMDB_API_KEY = "845af1f7"
 OMDB_URL = "https://www.omdbapi.com/"
 DB_NAME = "movieratings.db"
 
+# Function to load data from cache file
 def get_json_content(cache_file):
-    ''' Helper function to load data from cache file '''
     try:
         with open(cache_file, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
 
+# Function to save data to cache file
 def save_json_content(data, cache_file):
-    ''' Helper function to save data to cache file '''
     with open(cache_file, 'w') as f:
         json.dump(data, f, indent=4)
 
+# Function to fetch Rotten Tomatoes cache data
 def get_rotten_tomatoes_cache():
-    ''' Fetch Rotten Tomatoes ratings from cache '''
     return get_json_content('rottentomatoes_cache.json')
 
+# Function to save Rotten Tomatoes cache data
 def save_rotten_tomatoes_cache(data):
-    ''' Save Rotten Tomatoes ratings to cache '''
     save_json_content(data, 'rottentomatoes_cache.json')
 
+# Function to fetch IMDb cache data
 def get_imdb_cache():
-    ''' Fetch IMDb ratings from cache '''
     return get_json_content('imdb_cache.json')
 
+# Function to save IMDb cache data
 def save_imdb_cache(data):
-    ''' Save IMDb ratings to cache '''
     save_json_content(data, 'imdb_cache.json')
 
+# Function to fetch movie data from OMDb API
 def fetch_omdb_data(imdb_id):
     params = {'i': imdb_id, 'apikey': OMDB_API_KEY}
     response = requests.get(OMDB_URL, params=params)
@@ -54,22 +55,22 @@ def fetch_omdb_data(imdb_id):
     print(f"OMDb fetch failed for IMDb ID {imdb_id}")
     return None
 
+# Function to get Rotten Tomatoes rating from ratings list
 def get_rotten_tomatoes_rating(ratings_list):
-    ''' Get Rotten Tomatoes rating from ratings list '''
     for rating in ratings_list:
         if rating.get("Source") == "Rotten Tomatoes":
             return int(rating.get("Value").replace("%", ""))
     return None
 
+# Function to get IMDb rating from ratings list
 def get_imdb_rating(ratings_list):
-    ''' Get IMDb rating from ratings list '''
     for rating in ratings_list:
         if rating.get("Source") == "Internet Movie Database":
             return float(rating.get("Value").replace("/10", ""))
     return None
 
+# Create SQLite database and tables
 def create_db():
-    ''' Create SQLite tables '''
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
 
@@ -94,8 +95,8 @@ def create_db():
     conn.commit()
     conn.close()
 
+# Save movie data to SQLite database
 def save_movie_to_db(movie_data):
-    ''' Save movie and ratings data to SQLite '''
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
 
@@ -115,16 +116,22 @@ def save_movie_to_db(movie_data):
     conn.commit()
     conn.close()
 
+# Fetch and store movies from a list of IMDb IDs
 def fetch_and_store_movies(imdb_ids):
-    ''' Fetch and store movies from OMDb API, saving them in SQLite '''
     create_db()
+    count = 0
+
     for imdb_id in imdb_ids:
+        if count >= 100:  # Stop once we have 100 movies
+            break
         data = fetch_omdb_data(imdb_id)
         if data:
             save_movie_to_db(data)
             print(f"Saved: {data['title']} ({imdb_id})")
-        time.sleep(1)
+            count += 1
+        time.sleep(1)  # To avoid hitting the API rate limit
 
-# Example IMDb IDs for testing
-imdb_ids = ["tt3896198", "tt0848228", "tt0816692"]
+# --- Example IMDb IDs for testing ---
+# Normally, you would have a list of IMDb IDs to process. For testing, we use a few sample IDs.
+imdb_ids = ["tt3896198", "tt0848228", "tt0816692", "tt0111161", "tt0068646", "tt0071562"]  # Add more IMDb IDs to get to 100
 fetch_and_store_movies(imdb_ids)
