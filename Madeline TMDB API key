@@ -61,3 +61,49 @@ def get_movie_details(tmdb_id):
     else:
         print(f"Error fetching details for movie ID {tmdb_id}")
         return {}
+    
+def store_movies(limit=25):
+    create_db()
+    existing_ids = get_existing_tmdb_ids()
+    added_count = 0
+    page = 1
+
+    while added_count < limit:
+        movies = fetch_popular_movies(page)
+        if not movies:
+            break
+
+        for movie in movies:
+            if movie["id"] in existing_ids:
+                continue
+
+            details = get_movie_details(movie["id"])
+            title = details.get("title")
+            release_date = details.get("release_date")
+            domestic = details.get("revenue", 0)
+            worldwide = details.get("revenue", 0)  # Use a different field if available
+
+            conn = sqlite3.connect(DB_NAME)
+            cur = conn.cursor()
+            try:
+                cur.execute("INSERT INTO movies (title, release_date, tmdb_id) VALUES (?, ?, ?)",
+                            (title, release_date, movie["id"]))
+                movie_id = cur.lastrowid
+                cur.execute("INSERT INTO revenues (movie_id, domestic_revenue, worldwide_revenue) VALUES (?, ?, ?)",
+                            (movie_id, domestic, worldwide))
+                conn.commit()
+                added_count += 1
+                print(f"Added: {title}")
+            except sqlite3.IntegrityError:
+                print(f"Skipped duplicate: {title}")
+            finally:
+                conn.close()
+
+            if added_count >= limit:
+                break
+
+        page += 1
+        time.sleep(1)  # Respect API rate limits
+
+if __name__ == "__main__":
+    store_movies()
