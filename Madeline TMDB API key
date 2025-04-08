@@ -5,8 +5,33 @@ import sqlite3
 import time
 
 API_KEY = "e4d04998880c3bf739e025355c5327b9"
-READ_ACCESS_TOKEN = "your_read_access_token_here"  # Replace with actual
+READ_ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlNGQwNDk5ODg4MGMzYmY3MzllMDI1MzU1YzUzMjdiOSIsIm5iZiI6MTc0NDExNjY4My44Miwic3ViIjoiNjdmNTFiY2IzMWM5ZjI3Mjk5YWQ1N2Q5Iiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.HfBkmYpFkpZrYinP53M1oa7oLhL2yqBd5t6JZAxSAPc"  
 HEADERS = {"Authorization": f"Bearer {READ_ACCESS_TOKEN}"}
 BASE_URL = "https://api.themoviedb.org/3"
 
 DB_NAME = "movies.db"
+
+def create_db():
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS movies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            release_date TEXT,
+            tmdb_id INTEGER UNIQUE
+        )
+    ''')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS revenues (
+            movie_id INTEGER,
+            domestic_revenue INTEGER,
+            worldwide_revenue INTEGER,
+            FOREIGN KEY (movie_id) REFERENCES movies(id)
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
