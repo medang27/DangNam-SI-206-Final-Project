@@ -1,152 +1,145 @@
 # work on OMDb API code here
 
-import json
-import sqlite3
 import requests
+import sqlite3
+import os
 import time
+# Set API keys
+OMDB_API_KEY = '845af1f7'
+TMDB_API_KEY = 'e4d04998880c3bf739e025355c5327b9'
 
-OMDB_API_KEY = "845af1f7"
-OMDB_URL = "https://www.omdbapi.com/"
-DB_NAME = "movieratings.db"
+# API URLs
+OMDB_URL = 'https://www.omdbapi.com/'
+TMDB_URL = "https://api.themoviedb.org/3"
 
-# Function to load data from cache file
-def get_json_content(cache_file):
-    try:
-        with open(cache_file, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
+# SQLite DB setup
+DB_NAME = 'movieratings.db'
+TABLE_NAME = 'omdb_movies'
 
-# Function to save data to cache file
-def save_json_content(data, cache_file):
-    with open(cache_file, 'w') as f:
-        json.dump(data, f, indent=4)
-
-# Function to fetch Rotten Tomatoes cache data
-def get_rotten_tomatoes_cache():
-    return get_json_content('rottentomatoes_cache.json')
-
-# Function to save Rotten Tomatoes cache data
-def save_rotten_tomatoes_cache(data):
-    save_json_content(data, 'rottentomatoes_cache.json')
-
-# Function to fetch IMDb cache data
-def get_imdb_cache():
-    return get_json_content('imdb_cache.json')
-
-# Function to save IMDb cache data
-def save_imdb_cache(data):
-    save_json_content(data, 'imdb_cache.json')
-
-# Function to fetch movie data from OMDb API
-def fetch_omdb_data(imdb_id):
-    params = {'i': imdb_id, 'apikey': OMDB_API_KEY}
-    response = requests.get(OMDB_URL, params=params)
-    if response.status_code == 200:
-        data = response.json()
-        if data.get("Response") == "True":
-            return {
-                "title": data.get("Title"),
-                "release_date": data.get("Released"),
-                "imdbID": data.get("imdbID"),
-                "imdb_rating": float(data.get("imdbRating", 0.0)),
-                "rt_rating": get_rotten_tomatoes_rating(data.get("Ratings", []))
-            }
-    print(f"OMDb fetch failed for IMDb ID {imdb_id}")
-    return None
-
-# Function to get Rotten Tomatoes rating from ratings list
-def get_rotten_tomatoes_rating(ratings_list):
-    for rating in ratings_list:
-        if rating.get("Source") == "Rotten Tomatoes":
-            return int(rating.get("Value").replace("%", ""))
-    return None
-
-# Function to get IMDb rating from ratings list
-def get_imdb_rating(ratings_list):
-    for rating in ratings_list:
-        if rating.get("Source") == "Internet Movie Database":
-            return float(rating.get("Value").replace("/10", ""))
-    return None
-
-# Create SQLite database and tables
-def create_db():
+# Create SQLite database and table if it doesn't exist
+def setup_database():
     conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS movies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cursor = conn.cursor()
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+            imdb_id TEXT PRIMARY KEY,
             title TEXT,
-            release_date TEXT,
-            imdbID TEXT UNIQUE
-        )
-    ''')
-
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS ratings (
-            movie_id INTEGER,
             imdb_rating REAL,
-            rt_rating INTEGER,
-            FOREIGN KEY (movie_id) REFERENCES movies(id)
+            rotten_tomatoes_rating TEXT
         )
     ''')
-
     conn.commit()
     conn.close()
 
-# Save movie data to SQLite database
-def save_movie_to_db(movie_data):
+# Get a page of popular movie titles from TMDb
+def fetch_titles_from_tmdb(page=1):
+    url = f"{TMDB_URL}/movie/popular"
+    params = {
+        "api_key": TMDB_API_KEY,
+        "language": "en-US",
+        "page": page
+    }
+
+    response = requests.get(url, params=params)
+    if response.status_code != 200:
+        print(f"[TMDB ERROR {response.status_code}]: {response.text}")
+        return []
+
+    try:
+        data = response.json()
+        return [movie['title'] for movie in data.get('results', [])]
+    except Exception as e:
+        print(f"[JSON DECODE ERROR]: {e}")
+        print("Response text:", response.text)
+        return []
+
+# Query OMDb for details on one movie
+def fetch_movie_data_from_omdb(title):
+    params = {
+        't': title,
+        'apikey': OMDB_API_KEY
+    }
+
+    response = requests.get(OMDB_URL, params=params)
+    if response.status_code != 200:
+        print(f"[OMDB ERROR {response.status_code}]: {response.text}")
+        return None
+
+    try:
+        data = response.json()
+        if data.get("Response") == "False":
+            return None
+
+        imdb_id = data.get("imdbID")
+        imdb_rating = float(data.get("imdbRating", 0)) if data.get("imdbRating") not in ['N/A', None] else None
+
+        rt_rating = None
+        for rating in data.get("Ratings", []):
+            if rating["Source"] == "Rotten Tomatoes":
+                rt_rating = rating["Value"]
+
+        return {
+            "title": data.get("Title"),
+            "imdb_id": imdb_id,
+            "imdb_rating": imdb_rating,
+            "rotten_tomatoes_rating": rt_rating
+        }
+    except Exception as e:
+        print(f"[OMDB JSON ERROR]: {e}")
+        return None
+
+# Store one movie record in SQLite (if not a duplicate)
+def store_movie_in_db(movie_data):
+    if not movie_data or not movie_data.get("imdb_id"):
+        return
+
     conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-
-    cur.execute('''
-        INSERT OR IGNORE INTO movies (title, release_date, imdbID)
-        VALUES (?, ?, ?)
-    ''', (movie_data["title"], movie_data["release_date"], movie_data["imdbID"]))
-
-    cur.execute("SELECT id FROM movies WHERE imdbID = ?", (movie_data["imdbID"],))
-    movie_id = cur.fetchone()[0]
-
-    cur.execute('''
-        INSERT INTO ratings (movie_id, imdb_rating, rt_rating)
-        VALUES (?, ?, ?)
-    ''', (movie_id, movie_data["imdb_rating"], movie_data["rt_rating"]))
-
+    cursor = conn.cursor()
+    cursor.execute(f'''
+        INSERT OR IGNORE INTO {TABLE_NAME} (imdb_id, title, imdb_rating, rotten_tomatoes_rating)
+        VALUES (?, ?, ?, ?)
+    ''', (
+        movie_data["imdb_id"],
+        movie_data["title"],
+        movie_data["imdb_rating"],
+        movie_data["rotten_tomatoes_rating"]
+    ))
     conn.commit()
     conn.close()
 
-# Fetch and store movies from a list of IMDb IDs
-def fetch_and_store_movies(imdb_ids):
-    create_db()
-    count = 0
+# Fetch and store up to 100 movies, 25 at a time
+def fetch_and_store_movies():
+    setup_database()
 
-    for imdb_id in imdb_ids:
-        if count >= 100:  # Stop once we have 100 movies
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT COUNT(*) FROM {TABLE_NAME}")
+    current_count = cursor.fetchone()[0]
+    conn.close()
+
+    print(f"[INFO] Starting with {current_count} rows in the database.")
+
+    page = 1
+    while current_count < 100:
+        titles = fetch_titles_from_tmdb(page)
+        if not titles:
             break
-        data = fetch_omdb_data(imdb_id)
-        if data:
-            save_movie_to_db(data)
-            print(f"Saved: {data['title']} ({imdb_id})")
-            count += 1
-        time.sleep(1)  # To avoid hitting the API rate limit
 
-# --- Example IMDb IDs for testing ---
-# Normally, you would have a list of IMDb IDs to process. For testing, we use a few sample IDs.
-imdb_ids = [
-    "tt0111161", "tt0068646", "tt0071562", "tt0468569", "tt0050083", "tt0108052", "tt0167260", "tt0110912",
-    "tt0060196", "tt0137523", "tt0120737", "tt0109830", "tt1375666", "tt0167261", "tt0080684", "tt0133093",
-    "tt0099685", "tt0073486", "tt0047478", "tt0114369", "tt0317248", "tt0102926", "tt0038650", "tt0076759",
-    "tt0120815", "tt0118799", "tt0110413", "tt0245429", "tt0120689", "tt0816692", "tt0056058", "tt0110357",
-    "tt0088763", "tt2582802", "tt0034583", "tt0021749", "tt1675434", "tt0064116", "tt0253474", "tt0103064",
-    "tt0120586", "tt0407887", "tt2582782", "tt0209144", "tt0032553", "tt0172495", "tt0482571", "tt0078788",
-    "tt1853728", "tt0910970", "tt0405094", "tt4154796", "tt4154756", "tt0114814", "tt0082971", "tt0054215",
-    "tt1345836", "tt0095765", "tt0095327", "tt0114709", "tt0364569", "tt0180093", "tt0081505", "tt0087843",
-    "tt0057012", "tt0047396", "tt0033467", "tt1187043", "tt0910970", "tt0066921", "tt0361748", "tt0053125",
-    "tt0105236", "tt0027977", "tt0050825", "tt0082096", "tt0032138", "tt0112573", "tt0012349", "tt0043014",
-    "tt0051201", "tt0075314", "tt0070735", "tt0033467", "tt0033870", "tt0045152", "tt0071853", "tt0435761",
-    "tt0208092", "tt0056172", "tt0107290", "tt0086190", "tt0017136", "tt0086879", "tt0071315", "tt0119488",
-    "tt0086250", "tt0053604", "tt0113277", "tt0117951", "tt0052618", "tt0107290", "tt0093058", "tt0036775"
-]
+        for title in titles:
+            if current_count >= 100:
+                break
+            movie_data = fetch_movie_data_from_omdb(title)
+            if movie_data:
+                store_movie_in_db(movie_data)
+                current_count += 1
+                print(f"[+]{current_count}: Stored '{movie_data['title']}'")
 
-fetch_and_store_movies(imdb_ids)
+            time.sleep(0.5)  # Avoid rate-limiting
+
+        page += 1
+
+    print(f"[DONE] Final count: {current_count} movies in the database.")
+
+# Run the script
+if __name__ == "__main__":
+    fetch_and_store_movies()
