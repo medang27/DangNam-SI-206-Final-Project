@@ -1,5 +1,3 @@
-#work on TMDB code here
-
 import requests
 import sqlite3
 import time
@@ -10,6 +8,8 @@ HEADERS = {"Authorization": f"Bearer {READ_ACCESS_TOKEN}"}
 BASE_URL = "https://api.themoviedb.org/3"
 
 DB_NAME = "movies.db"
+
+# ---------- DB SETUP ----------
 
 def create_db():
     conn = sqlite3.connect(DB_NAME)
@@ -33,8 +33,18 @@ def create_db():
         )
     ''')
 
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS tmdb_table (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            total_revenue INTEGER
+        )
+    ''')
+
     conn.commit()
     conn.close()
+
+# ---------- FETCHING DATA ----------
 
 def get_existing_tmdb_ids():
     conn = sqlite3.connect(DB_NAME)
@@ -44,15 +54,15 @@ def get_existing_tmdb_ids():
     conn.close()
     return {row[0] for row in results}
 
-def fetch_highest_revenue_movies(page=1):
-    url = f"{BASE_URL}/discover/movie?api_key={API_KEY}&language=en-US&sort_by=revenue.desc&page={page}&vote_count.gte=100"
+def fetch_popular_movies(page=1):
+    url = f"{BASE_URL}/movie/popular?api_key={API_KEY}&language=en-US&page={page}"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()["results"]
     else:
-        print("Error fetching highest revenue movies:", response.text)
+        print("Error fetching popular movies:", response.text)
         return []
-    
+
 def get_movie_details(tmdb_id):
     url = f"{BASE_URL}/movie/{tmdb_id}?api_key={API_KEY}&language=en-US"
     response = requests.get(url)
@@ -61,7 +71,9 @@ def get_movie_details(tmdb_id):
     else:
         print(f"Error fetching details for movie ID {tmdb_id}")
         return {}
-    
+
+# ---------- STORING MOVIES & REVENUE ----------
+
 def store_movies(limit=25):
     create_db()
     existing_ids = get_existing_tmdb_ids()
@@ -69,7 +81,7 @@ def store_movies(limit=25):
     page = 1
 
     while added_count < limit:
-        movies = fetch_highest_revenue_movies(page)
+        movies = fetch_popular_movies(page)
 
         if not movies:
             break
@@ -81,8 +93,7 @@ def store_movies(limit=25):
             details = get_movie_details(movie["id"])
             title = details.get("title")
             release_date = details.get("release_date")
-            domestic = details.get("revenue", 0)
-            worldwide = details.get("revenue", 0)  # Use a different field if available
+            revenue = details.get("revenue", 0)
 
             conn = sqlite3.connect(DB_NAME)
             cur = conn.cursor()
@@ -91,7 +102,7 @@ def store_movies(limit=25):
                             (title, release_date, movie["id"]))
                 movie_id = cur.lastrowid
                 cur.execute("INSERT INTO revenues (movie_id, domestic_revenue, worldwide_revenue) VALUES (?, ?, ?)",
-                            (movie_id, domestic, worldwide))
+                            (movie_id, revenue, revenue))  # Using same revenue for both for now
                 conn.commit()
                 added_count += 1
                 print(f"Added: {title}")
@@ -104,7 +115,45 @@ def store_movies(limit=25):
                 break
 
         page += 1
-        time.sleep(1)  # Respect API rate limits
+        time.sleep(1)  # Be nice to the API
+
+# ---------- COMBINE TABLES INTO tmdb_table ----------
+
+def create_combined_tmdb_table():
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    # Reset the tmdb_table to avoid duplicates (optional in testing)
+    cur.execute("DROP TABLE IF EXISTS tmdb_table")
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS tmdb_table (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            total_revenue INTEGER
+        )
+    ''')
+
+    # Join movies + revenues and calculate total revenue
+    cur.execute('''
+        SELECT m.id, m.title, 
+               COALESCE(r.domestic_revenue, 0) + COALESCE(r.worldwide_revenue, 0) as total_revenue
+        FROM movies m
+        JOIN revenues r ON m.id = r.movie_id
+    ''')
+    rows = cur.fetchall()
+
+    for row in rows:
+        cur.execute('''
+            INSERT INTO tmdb_table (id, title, total_revenue)
+            VALUES (?, ?, ?)
+        ''', (row[0], row[1], row[2]))
+
+    conn.commit()
+    conn.close()
+    print("✅ Combined `tmdb_table` created!")
+
+# ---------- MAIN ----------
 
 if __name__ == "__main__":
-    store_movies()
+    store_movies()  # Run this multiple times to get 100+ movies
+    create_combined_tmdb_table()
