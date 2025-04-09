@@ -13,7 +13,7 @@ OMDB_URL = 'https://www.omdbapi.com/'
 TMDB_URL = "https://api.themoviedb.org/3"
 
 # SQLite DB setup
-DB_NAME = 'movieratings.db'
+DB_NAME = 'movies.db'
 TABLE_NAME = 'omdb_movies'
 
 # Create SQLite database and table if it doesn't exist
