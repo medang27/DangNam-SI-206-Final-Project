@@ -4,6 +4,7 @@ import requests
 import sqlite3
 import os
 import time
+
 # Set API keys
 OMDB_API_KEY = '845af1f7'
 TMDB_API_KEY = 'e4d04998880c3bf739e025355c5327b9'
@@ -16,7 +17,7 @@ TMDB_URL = "https://api.themoviedb.org/3"
 DB_NAME = 'movies.db'
 TABLE_NAME = 'omdb_movies'
 
-# Create SQLite database and table if it doesn't exist
+# Create SQLite database and table (without Rotten Tomatoes rating)
 def setup_database():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -24,8 +25,7 @@ def setup_database():
         CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
             imdb_id TEXT PRIMARY KEY,
             title TEXT,
-            imdb_rating REAL,
-            rotten_tomatoes_rating TEXT
+            imdb_rating REAL
         )
     ''')
     conn.commit()
@@ -73,73 +73,67 @@ def fetch_movie_data_from_omdb(title):
         imdb_id = data.get("imdbID")
         imdb_rating = float(data.get("imdbRating", 0)) if data.get("imdbRating") not in ['N/A', None] else None
 
-        rt_rating = None
-        for rating in data.get("Ratings", []):
-            if rating["Source"] == "Rotten Tomatoes":
-                rt_rating = rating["Value"]
-
         return {
             "title": data.get("Title"),
             "imdb_id": imdb_id,
-            "imdb_rating": imdb_rating,
-            "rotten_tomatoes_rating": rt_rating
+            "imdb_rating": imdb_rating
         }
     except Exception as e:
         print(f"[OMDB JSON ERROR]: {e}")
         return None
 
-# Store one movie record in SQLite (if not a duplicate)
+# Store one movie record in SQLite (only if it's new)
 def store_movie_in_db(movie_data):
     if not movie_data or not movie_data.get("imdb_id"):
-        return
+        return False  # Skip invalid
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(f'''
-        INSERT OR IGNORE INTO {TABLE_NAME} (imdb_id, title, imdb_rating, rotten_tomatoes_rating)
-        VALUES (?, ?, ?, ?)
+        INSERT OR IGNORE INTO {TABLE_NAME} (imdb_id, title, imdb_rating)
+        VALUES (?, ?, ?)
     ''', (
         movie_data["imdb_id"],
         movie_data["title"],
-        movie_data["imdb_rating"],
-        movie_data["rotten_tomatoes_rating"]
+        movie_data["imdb_rating"]
     ))
     conn.commit()
+    rows_affected = cursor.rowcount
     conn.close()
 
-# Fetch and store up to 100 movies, 25 at a time
+    return rows_affected > 0  # True if inserted
+
+# Fetch and store up to 25 NEW movies per execution
 def fetch_and_store_movies():
     setup_database()
 
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT COUNT(*) FROM {TABLE_NAME}")
-    current_count = cursor.fetchone()[0]
-    conn.close()
-
-    print(f"[INFO] Starting with {current_count} rows in the database.")
-
+    inserted_count = 0
     page = 1
-    while current_count < 100:
+
+    print(f"[INFO] Starting data insertion (max 25 new items)...")
+
+    while inserted_count < 25:
         titles = fetch_titles_from_tmdb(page)
         if not titles:
             break
 
         for title in titles:
-            if current_count >= 100:
+            if inserted_count >= 25:
                 break
             movie_data = fetch_movie_data_from_omdb(title)
             if movie_data:
-                store_movie_in_db(movie_data)
-                current_count += 1
-                print(f"[+]{current_count}: Stored '{movie_data['title']}'")
+                was_inserted = store_movie_in_db(movie_data)
+                if was_inserted:
+                    inserted_count += 1
+                    print(f"[+]{inserted_count}: Stored '{movie_data['title']}'")
+                else:
+                    print(f"[=] Skipped duplicate: '{movie_data['title']}'")
 
-            time.sleep(0.5)  # Avoid rate-limiting
+            time.sleep(0.5)  # Respect API rate limits
 
         page += 1
 
-    print(f"[DONE] Final count: {current_count} movies in the database.")
-
+    print(f"[DONE] Inserted {inserted_count} new movie(s) into the database.")
 
 # Run the script
 if __name__ == "__main__":
