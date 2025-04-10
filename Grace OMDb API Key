@@ -16,6 +16,9 @@ TMDB_URL = "https://api.themoviedb.org/3"
 # SQLite DB setup
 DB_NAME = 'movies.db'
 TABLE_NAME = 'omdb_movies'
+TMDB_TABLE_NAME = 'tmdb_table'
+JOINED_TABLE_NAME = 'joined_movies'
+
 
 # Create SQLite database and table (without Rotten Tomatoes rating)
 def setup_database():
@@ -134,6 +137,47 @@ def fetch_and_store_movies():
         page += 1
 
     print(f"[DONE] Inserted {inserted_count} new movie(s) into the database.")
+
+def setup_joined_table():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {JOINED_TABLE_NAME} (
+            imdb_id TEXT PRIMARY KEY,
+            title TEXT,
+            imdb_rating REAL,
+            tmdb_id INTEGER,
+            total_revenue INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def join_movies():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # SQL query to join the two tables based on the movie title
+    cursor.execute(f'''
+        INSERT INTO {JOINED_TABLE_NAME} (imdb_id, title, imdb_rating, tmdb_id, total_revenue)
+        SELECT omdb.imdb_id, omdb.title, omdb.imdb_rating, tmdb.id, tmdb.total_revenue
+        FROM {TABLE_NAME} AS omdb
+        JOIN {TMDB_TABLE_NAME} AS tmdb
+        ON omdb.title = tmdb.title
+    ''')
+
+    conn.commit()
+    conn.close()
+
+def main():
+    fetch_and_store_movies()  # Fetch and store movies from OMDb and TMDb
+    setup_joined_table()  # Create the joined table if not already created
+    join_movies()  # Join the data from both tables and insert into the new table
+    print("[INFO] Movies from OMDb and TMDb with overlapping titles have been joined.")
+
+# Run the script
+if __name__ == "__main__":
+    main()
 
 # Run the script
 if __name__ == "__main__":
