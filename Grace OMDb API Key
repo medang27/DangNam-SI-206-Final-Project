@@ -129,7 +129,7 @@ def fetch_and_store_movies():
                 else:
                     print(f"[=] Skipped duplicate: '{movie_data['title']}'")
 
-            time.sleep(1)  # Respect API rate limits
+            time.sleep(0.5)  # Respect API rate limits
 
         page += 1
 
