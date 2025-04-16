@@ -153,24 +153,55 @@ def setup_joined_table():
     conn.commit()
     conn.close()
 
-def join_movies():
+def create_shared_movies_table():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
-    # SQL query to join the two tables based on the movie title
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS shared_movies (
+            movie_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            imdb_id TEXT,
+            tmdb_id INTEGER,
+            title TEXT
+        )
+    ''')
+    
+    # Insert matched titles from both APIs
     cursor.execute(f'''
-        INSERT INTO {JOINED_TABLE_NAME} (imdb_id, title, imdb_rating, tmdb_id, total_revenue)
-        SELECT omdb.imdb_id, omdb.title, omdb.imdb_rating, tmdb.id, tmdb.total_revenue
-        FROM {TABLE_NAME} AS omdb
-        JOIN {TMDB_TABLE_NAME} AS tmdb
+        INSERT INTO shared_movies (imdb_id, tmdb_id, title)
+        SELECT omdb.imdb_id, tmdb.id, omdb.title
+        FROM omdb_movies AS omdb
+        JOIN tmdb_table AS tmdb
         ON omdb.title = tmdb.title
     ''')
 
     conn.commit()
     conn.close()
+    print("[INFO] shared_movies table created and populated.")
+
+
+def join_movies():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(f'''
+        INSERT INTO {JOINED_TABLE_NAME} (imdb_id, title, imdb_rating, tmdb_id, total_revenue)
+        SELECT sm.imdb_id, omdb.title, omdb.imdb_rating, tmdb.id, tmdb.total_revenue
+        FROM shared_movies AS sm
+        JOIN omdb_movies AS omdb ON sm.imdb_id = omdb.imdb_id
+        JOIN tmdb_table AS tmdb ON sm.tmdb_id = tmdb.id
+    ''')
+
+    conn.commit()
+    conn.close()
+    print("[INFO] joined_movies table updated.")
+
+
+
 
 def main():
     fetch_and_store_movies()  # Fetch and store movies from OMDb and TMDb
+    create_shared_movies_table()
     setup_joined_table()  # Create the joined table if not already created
     join_movies()  # Join the data from both tables and insert into the new table
     print("[INFO] Movies from OMDb and TMDb with overlapping titles have been joined.")
