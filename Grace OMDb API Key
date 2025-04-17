@@ -1,3 +1,5 @@
+# work on OMDb API code here
+
 import requests
 import sqlite3
 import os
@@ -16,53 +18,19 @@ DB_NAME = 'movies.db'
 TABLE_NAME = 'omdb_movies'
 TMDB_TABLE_NAME = 'tmdb_table'
 JOINED_TABLE_NAME = 'joined_movies'
-SHARED_TABLE_NAME = 'shared_movies'
+
 
 # Create SQLite database and table (without Rotten Tomatoes rating)
 def setup_database():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    # Create shared_movies table with an auto-incrementing id
-    cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS {SHARED_TABLE_NAME} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT UNIQUE
-        )
-    ''')
-
-    # Create omdb_movies table
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
             imdb_id TEXT PRIMARY KEY,
             title TEXT,
-            imdb_rating REAL,
-            movie_id INTEGER,
-            FOREIGN KEY (movie_id) REFERENCES {SHARED_TABLE_NAME}(id)
+            imdb_rating REAL
         )
     ''')
-
-    # Create tmdb_table
-    cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS {TMDB_TABLE_NAME} (
-            tmdb_id INTEGER PRIMARY KEY,
-            title TEXT,
-            total_revenue INTEGER,
-            movie_id INTEGER,
-            FOREIGN KEY (movie_id) REFERENCES {SHARED_TABLE_NAME}(id)
-        )
-    ''')
-
-    # Create joined_movies table
-    cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS {JOINED_TABLE_NAME} (
-            movie_id INTEGER PRIMARY KEY,
-            imdb_rating REAL,
-            total_revenue INTEGER,
-            FOREIGN KEY (movie_id) REFERENCES {SHARED_TABLE_NAME}(id)
-        )
-    ''')
-
     conn.commit()
     conn.close()
 
@@ -117,43 +85,26 @@ def fetch_movie_data_from_omdb(title):
         print(f"[OMDB JSON ERROR]: {e}")
         return None
 
-# Store movie title in shared_movies and return the id
-def store_shared_movie(title):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(f"INSERT OR IGNORE INTO {SHARED_TABLE_NAME} (title) VALUES (?)", (title,))
-    conn.commit()
-    cursor.execute(f"SELECT id FROM {SHARED_TABLE_NAME} WHERE title = ?", (title,))
-    movie_id = cursor.fetchone()[0]
-    conn.close()
-    return movie_id
-
-# Store movie data in the database
+# Store one movie record in SQLite (only if it's new)
 def store_movie_in_db(movie_data):
     if not movie_data or not movie_data.get("imdb_id"):
-        return False  # Skip invalid data
-
-    movie_id = store_shared_movie(movie_data["title"])
+        return False  # Skip invalid
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
-    # Insert into omdb_movies table
     cursor.execute(f'''
-        INSERT OR IGNORE INTO {TABLE_NAME} (imdb_id, title, imdb_rating, movie_id)
-        VALUES (?, ?, ?, ?)
+        INSERT OR IGNORE INTO {TABLE_NAME} (imdb_id, title, imdb_rating)
+        VALUES (?, ?, ?)
     ''', (
         movie_data["imdb_id"],
         movie_data["title"],
-        movie_data["imdb_rating"],
-        movie_id
+        movie_data["imdb_rating"]
     ))
-
     conn.commit()
     rows_affected = cursor.rowcount
     conn.close()
 
-    return rows_affected > 0  # Return True if inserted
+    return rows_affected > 0  # True if inserted
 
 # Fetch and store up to 25 NEW movies per execution
 def fetch_and_store_movies():
@@ -187,26 +138,78 @@ def fetch_and_store_movies():
 
     print(f"[DONE] Inserted {inserted_count} new movie(s) into the database.")
 
-def join_movies():
+def setup_joined_table():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
-    # Join the data from OMDb and TMDb into joined_movies using the movie_id
     cursor.execute(f'''
-        INSERT OR IGNORE INTO {JOINED_TABLE_NAME} (movie_id, imdb_rating, total_revenue)
-        SELECT omdb.movie_id, omdb.imdb_rating, tmdb.total_revenue
-        FROM {TABLE_NAME} AS omdb
-        JOIN {TMDB_TABLE_NAME} AS tmdb ON omdb.title = tmdb.title
+        CREATE TABLE IF NOT EXISTS {JOINED_TABLE_NAME} (
+            imdb_id TEXT PRIMARY KEY,
+            title TEXT,
+            imdb_rating REAL,
+            tmdb_id INTEGER,
+            total_revenue INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def create_shared_movies_table():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS shared_movies (
+            movie_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            imdb_id TEXT,
+            tmdb_id INTEGER,
+            title TEXT
+        )
+    ''')
+    
+    # Insert matched titles from both APIs
+    cursor.execute(f'''
+        INSERT INTO shared_movies (imdb_id, tmdb_id, title)
+        SELECT omdb.imdb_id, tmdb.id, omdb.title
+        FROM omdb_movies AS omdb
+        JOIN tmdb_table AS tmdb
+        ON omdb.title = tmdb.title
     ''')
 
     conn.commit()
     conn.close()
-    print("[INFO] joined_movies table updated with movie data using movie_ids.")
+    print("[INFO] shared_movies table created and populated.")
 
-# Main function
+
+def join_movies():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(f'''
+        INSERT INTO {JOINED_TABLE_NAME} (imdb_id, title, imdb_rating, tmdb_id, total_revenue)
+        SELECT sm.imdb_id, omdb.title, omdb.imdb_rating, tmdb.id, tmdb.total_revenue
+        FROM shared_movies AS sm
+        JOIN omdb_movies AS omdb ON sm.imdb_id = omdb.imdb_id
+        JOIN tmdb_table AS tmdb ON sm.tmdb_id = tmdb.id
+    ''')
+
+    conn.commit()
+    conn.close()
+    print("[INFO] joined_movies table updated.")
+
+
+
+
 def main():
     fetch_and_store_movies()  # Fetch and store movies from OMDb and TMDb
-    join_movies()  # Join data from both APIs into the final table
+    create_shared_movies_table()
+    setup_joined_table()  # Create the joined table if not already created
+    join_movies()  # Join the data from both tables and insert into the new table
+    print("[INFO] Movies from OMDb and TMDb with overlapping titles have been joined.")
 
+# Run the script
 if __name__ == "__main__":
     main()
+
+# Run the script
+if __name__ == "__main__":
+    fetch_and_store_movies()
