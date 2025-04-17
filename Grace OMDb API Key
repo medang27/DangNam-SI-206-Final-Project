@@ -162,17 +162,18 @@ def create_shared_movies_table():
     # Drop the existing table if it exists
     cursor.execute('DROP TABLE IF EXISTS shared_movies')
 
-    # Create a new table with only the unique movie titles
+    # Create a new table with only the movie_id and title
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shared_movies (
-            title TEXT PRIMARY KEY
+            movie_id TEXT PRIMARY KEY,
+            title TEXT
         )
     ''')
 
-    # Insert unique movie titles from both OMDb and TMDb
+    # Insert unique movie ids and titles from both OMDb and TMDb
     cursor.execute(f'''
-        INSERT INTO shared_movies (title)
-        SELECT DISTINCT omdb.title
+        INSERT INTO shared_movies (movie_id, title)
+        SELECT DISTINCT omdb.imdb_id, omdb.title
         FROM omdb_movies AS omdb
         JOIN tmdb_table AS tmdb
         ON omdb.title = tmdb.title
@@ -180,7 +181,7 @@ def create_shared_movies_table():
 
     conn.commit()
     conn.close()
-    print("[INFO] shared_movies table created with unique movie titles only.")
+    print("[INFO] shared_movies table created with movie_id and title only.")
 
 def join_movies():
     conn = sqlite3.connect(DB_NAME)
