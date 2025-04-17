@@ -153,6 +153,7 @@ def setup_joined_table():
     conn.commit()
     conn.close()
 
+# Modify shared_movies table to include an ID for each movie
 def create_shared_movies_table():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -160,16 +161,17 @@ def create_shared_movies_table():
     # Drop the existing table if it exists
     cursor.execute('DROP TABLE IF EXISTS shared_movies')
 
-    # Create a new table with only the unique movie titles
+    # Create a new table with an auto-incrementing id
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shared_movies (
-            title TEXT PRIMARY KEY
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT UNIQUE
         )
     ''')
 
     # Insert unique movie titles from both OMDb and TMDb
     cursor.execute(f'''
-        INSERT INTO shared_movies (title)
+        INSERT OR IGNORE INTO shared_movies (title)
         SELECT DISTINCT omdb.title
         FROM omdb_movies AS omdb
         JOIN tmdb_table AS tmdb
@@ -178,8 +180,9 @@ def create_shared_movies_table():
 
     conn.commit()
     conn.close()
-    print("[INFO] shared_movies table created with unique movie titles only.")
+    print("[INFO] shared_movies table created with unique movie titles and assigned IDs.")
 
+# Modify the join_movies function to use movie IDs instead of titles
 def join_movies():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -187,19 +190,20 @@ def join_movies():
     # Create unique shared_movies table to ensure only unique titles
     create_shared_movies_table()
 
-    # Create the joined_movies table without tmdb_id and imdb_id
+    # Create the joined_movies table with movie_id as the reference
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS {JOINED_TABLE_NAME} (
-            title TEXT PRIMARY KEY,
+            movie_id INTEGER PRIMARY KEY,
             imdb_rating REAL,
-            total_revenue INTEGER
+            total_revenue INTEGER,
+            FOREIGN KEY (movie_id) REFERENCES shared_movies(id)
         )
     ''')
 
-    # Join the two tables based on unique movie titles and insert into joined_movies
+    # Join the two tables based on movie ID and insert into joined_movies
     cursor.execute(f'''
-        INSERT INTO {JOINED_TABLE_NAME} (title, imdb_rating, total_revenue)
-        SELECT omdb.title, omdb.imdb_rating, tmdb.total_revenue
+        INSERT INTO {JOINED_TABLE_NAME} (movie_id, imdb_rating, total_revenue)
+        SELECT sm.id, omdb.imdb_rating, tmdb.total_revenue
         FROM shared_movies AS sm
         JOIN omdb_movies AS omdb ON sm.title = omdb.title
         JOIN tmdb_table AS tmdb ON sm.title = tmdb.title
@@ -207,21 +211,7 @@ def join_movies():
 
     conn.commit()
     conn.close()
-    print("[INFO] joined_movies table updated with unique movie titles.")
-
-# Main function that fetches, stores, and joins the data
-def main():
-    fetch_and_store_movies()  # Fetch and store movies from OMDb and TMDb
-    setup_joined_table()  # Create the joined table if not already created
-    join_movies()  # Join the data from both tables and insert into the new table
-    print("[INFO] Movies from OMDb and TMDb with overlapping titles have been joined.")
-
-# Run the script
-if __name__ == "__main__":
-    main()
-
-
-
+    print("[INFO] joined_movies table updated with movie IDs.")
 
 def main():
     fetch_and_store_movies()  # Fetch and store movies from OMDb and TMDb
