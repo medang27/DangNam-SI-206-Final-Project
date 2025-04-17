@@ -193,7 +193,7 @@ def join_movies():
 
     # Join the data from OMDb and TMDb into joined_movies using the movie_id
     cursor.execute(f'''
-        INSERT INTO {JOINED_TABLE_NAME} (movie_id, imdb_rating, total_revenue)
+        INSERT OR IGNORE INTO {JOINED_TABLE_NAME} (movie_id, imdb_rating, total_revenue)
         SELECT omdb.movie_id, omdb.imdb_rating, tmdb.total_revenue
         FROM {TABLE_NAME} AS omdb
         JOIN {TMDB_TABLE_NAME} AS tmdb ON omdb.title = tmdb.title
