@@ -169,23 +169,27 @@ def setup_joined_table():
 def create_shared_movies_table():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+
     cursor.execute('DROP TABLE IF EXISTS shared_movies')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shared_movies (
-            movie_id TEXT PRIMARY KEY,
-            title TEXT
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT UNIQUE
         )
     ''')
+
     cursor.execute(f'''
-        INSERT INTO shared_movies (movie_id, title)
-        SELECT DISTINCT omdb.imdb_id, omdb.title
+        INSERT OR IGNORE INTO shared_movies (title)
+        SELECT DISTINCT omdb.title
         FROM omdb_movies AS omdb
         JOIN tmdb_table AS tmdb
         ON omdb.title = tmdb.title
     ''')
+
     conn.commit()
     conn.close()
-    print("[INFO] shared_movies table created with movie_id and title only.")
+    print("[INFO] shared_movies table created with auto-generated ID and title.")
+
 
 def join_movies():
     conn = sqlite3.connect(DB_NAME)
