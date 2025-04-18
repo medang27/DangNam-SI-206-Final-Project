@@ -17,24 +17,29 @@ TABLE_NAME = 'omdb_movies'
 TMDB_TABLE_NAME = 'tmdb_table'
 JOINED_TABLE_NAME = 'joined_movies'
 
-# Create SQLite database and table (without Rotten Tomatoes rating)
+# Create SQLite database and table with unique title
 def setup_database():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
-    # Drop the table if it exists to ensure we start fresh with the correct schema
-    cursor.execute(f'DROP TABLE IF EXISTS {TABLE_NAME}')
-
-    # Create the table with the correct structure, including the 'title' column
+    # Do NOT drop the table — just ensure it exists
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
             imdb_id TEXT PRIMARY KEY,
-            title TEXT,
+            title TEXT UNIQUE,
             imdb_rating REAL
         )
     ''')
     conn.commit()
     conn.close()
+
+# Helper to check for duplicate title
+def is_title_already_stored(title):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT 1 FROM {TABLE_NAME} WHERE title = ?", (title,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
 
 # Get a page of popular movie titles from TMDb
 def fetch_titles_from_tmdb(page=1):
@@ -120,11 +125,17 @@ def fetch_and_store_movies():
     while inserted_count < 25:
         titles = fetch_titles_from_tmdb(page)
         if not titles:
-            break
+            page += 1
+            continue  # Move to next page if nothing returned
 
         for title in titles:
             if inserted_count >= 25:
                 break
+
+            if is_title_already_stored(title):
+                print(f"[=] Skipped duplicate title: '{title}'")
+                continue
+
             movie_data = fetch_movie_data_from_omdb(title)
             if movie_data:
                 was_inserted = store_movie_in_db(movie_data)
@@ -132,7 +143,7 @@ def fetch_and_store_movies():
                     inserted_count += 1
                     print(f"[+]{inserted_count}: Stored '{movie_data['title']}'")
                 else:
-                    print(f"[=] Skipped duplicate: '{movie_data['title']}'")
+                    print(f"[=] Skipped: '{movie_data['title']}' (duplicate imdb_id)")
 
             time.sleep(0.5)  # Respect API rate limits
 
@@ -158,19 +169,13 @@ def setup_joined_table():
 def create_shared_movies_table():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
-    # Drop the existing table if it exists
     cursor.execute('DROP TABLE IF EXISTS shared_movies')
-
-    # Create a new table with only the movie_id and title
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shared_movies (
             movie_id TEXT PRIMARY KEY,
             title TEXT
         )
     ''')
-
-    # Insert unique movie ids and titles from both OMDb and TMDb
     cursor.execute(f'''
         INSERT INTO shared_movies (movie_id, title)
         SELECT DISTINCT omdb.imdb_id, omdb.title
@@ -178,7 +183,6 @@ def create_shared_movies_table():
         JOIN tmdb_table AS tmdb
         ON omdb.title = tmdb.title
     ''')
-
     conn.commit()
     conn.close()
     print("[INFO] shared_movies table created with movie_id and title only.")
@@ -187,10 +191,8 @@ def join_movies():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # Create unique shared_movies table to ensure only unique titles
     create_shared_movies_table()
 
-    # Create the joined_movies table without tmdb_id and imdb_id
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS {JOINED_TABLE_NAME} (
             title TEXT PRIMARY KEY,
@@ -199,7 +201,6 @@ def join_movies():
         )
     ''')
 
-    # Join the two tables based on unique movie titles and insert into joined_movies
     cursor.execute(f'''
         INSERT INTO {JOINED_TABLE_NAME} (title, imdb_rating, total_revenue)
         SELECT omdb.title, omdb.imdb_rating, tmdb.total_revenue
@@ -212,13 +213,11 @@ def join_movies():
     conn.close()
     print("[INFO] joined_movies table updated with unique movie titles.")
 
-# Main function that fetches, stores, and joins the data
 def main():
-    fetch_and_store_movies()  # Fetch and store movies from OMDb and TMDb
-    setup_joined_table()  # Create the joined table if not already created
-    join_movies()  # Join the data from both tables and insert into the new table
+    fetch_and_store_movies()
+    setup_joined_table()
+    join_movies()
     print("[INFO] Movies from OMDb and TMDb with overlapping titles have been joined.")
 
-# Run the script
 if __name__ == "__main__":
     main()
