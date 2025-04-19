@@ -235,33 +235,25 @@ def write_average_to_file(average, filename="average_rating.txt"):
         f.write(f"Average IMDb Rating: {average:.2f}\n")
     print(f"[INFO] Average written to {filename}")
 
-def visualize_ratings():
+def visualize_revenue_vs_rating():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # Fetch up to 20 movies (increase the number if there are more than 10)
-    cursor.execute("SELECT title, imdb_rating FROM joined_movies ORDER BY imdb_rating DESC LIMIT 20")
+    cursor.execute("SELECT imdb_rating, total_revenue FROM joined_movies")
     data = cursor.fetchall()
     conn.close()
 
-    # If fewer than 10, show the available data
-    if not data:
-        print("[INFO] No data found for visualization.")
-        return
+    ratings = [row[0] for row in data]
+    revenue = [row[1] for row in data]
 
-    titles = [row[0] for row in data]
-    ratings = [row[1] for row in data]
-
-    plt.figure(figsize=(12, 8))
-    plt.barh(titles, ratings, color='skyblue')
+    plt.scatter(ratings, revenue, color='orange')
     plt.xlabel("IMDb Rating")
-    plt.title("Top Movies by IMDb Rating")
-    plt.gca().invert_yaxis()  # To have the highest rated movie at the top
+    plt.ylabel("Total Revenue")
+    plt.title("IMDb Rating vs Total Revenue")
     plt.tight_layout()
-    plt.savefig("top_movies_imdb_ratings.png")
+    plt.savefig("revenue_vs_rating.png")
     plt.show()
-    print("[INFO] Visualization saved and displayed.")
-
+    print("[INFO] Revenue vs Rating Visualization saved and displayed.")
 
 def main():
     fetch_and_store_movies()
@@ -269,7 +261,7 @@ def main():
     join_movies()
     average_rating = calculate_average_imdb_rating()
     write_average_to_file(average_rating)
-    visualize_ratings()
+    visualize_revenue_vs_rating()
     print("[INFO] Movies from OMDb and TMDb with overlapping titles have been joined.")
 
 if __name__ == "__main__":
