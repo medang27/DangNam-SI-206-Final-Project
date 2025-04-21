@@ -1,6 +1,9 @@
 import sqlite3
 import requests
 import time
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 API_KEY = "e4d04998880c3bf739e025355c5327b9"
 BASE_URL = "https://api.themoviedb.org/3"
@@ -96,6 +99,64 @@ def store_tmdb_data(limit=25):
         time.sleep(1)  # Be nice to the API
 
 
+# ---------- JOINED TABLE WITH SHARED INTEGER KEY ----------
+def create_joined_table_with_key(db_name='movies.db'):
+    conn = sqlite3.connect(db_name)
+    cur = conn.cursor()
+
+    # Drop if exists (for testing purposes)
+    cur.execute('DROP TABLE IF EXISTS joined_movies')
+
+    # Create joined table with shared key
+    cur.execute('''
+        CREATE TABLE joined_movies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            imdb_rating REAL,
+            total_revenue INTEGER
+        )
+    ''')
+
+    # Insert data from JOIN of omdb_movies and tmdb_table
+    cur.execute('''
+        INSERT INTO joined_movies (title, imdb_rating, total_revenue)
+        SELECT o.title, o.imdb_rating, t.total_revenue
+        FROM omdb_movies o
+        JOIN tmdb_table t ON o.title = t.title
+        WHERE o.imdb_rating IS NOT NULL AND t.total_revenue > 0
+    ''')
+
+    conn.commit()
+    conn.close()
+    print("[INFO] joined_movies table with shared integer key created.")
+
+# ---------- LOAD JOINED DATA ----------
+def load_joined_data(db_name='movies.db'):
+    conn = sqlite3.connect(db_name)
+    df = pd.read_sql_query("SELECT * FROM joined_movies", conn)
+    conn.close()
+    return df
+
+# ---------- CORRELATION HEATMAP ----------
+def create_correlation_heatmap(df):
+    # Calculate correlation matrix
+    corr = df[['imdb_rating', 'total_revenue']].corr()
+
+    # Set up the plot
+    plt.figure(figsize=(6, 4))
+    sns.heatmap(corr, annot=True, cmap='coolwarm', fmt=".2f", vmin=-1, vmax=1)
+
+    # Customize the plot
+    plt.title("Correlation Heatmap: IMDb Rating vs Total Revenue")
+    plt.tight_layout()
+
+    # Show or save the plot
+    plt.savefig('correlation_heatmap.png')
+    plt.show()
+
 # ---------- MAIN ----------
 if __name__ == "__main__":
     store_tmdb_data()  # Run this to store the movies
+    create_joined_table_with_key()  # Create the joined table with shared integer key
+    df = load_joined_data()  # Load the data into a DataFrame
+    create_correlation_heatmap(df)  # Create the correlation heatmap
