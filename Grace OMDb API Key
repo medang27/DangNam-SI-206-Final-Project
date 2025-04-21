@@ -1,9 +1,8 @@
-# work on OMDb API code here
-
 import requests
 import sqlite3
 import os
 import time
+import matplotlib.pyplot as plt
 
 # Set API keys
 OMDB_API_KEY = '845af1f7'
@@ -16,20 +15,32 @@ TMDB_URL = "https://api.themoviedb.org/3"
 # SQLite DB setup
 DB_NAME = 'movies.db'
 TABLE_NAME = 'omdb_movies'
+TMDB_TABLE_NAME = 'tmdb_table'
+JOINED_TABLE_NAME = 'joined_movies'
 
-# Create SQLite database and table (without Rotten Tomatoes rating)
+# Create SQLite database and table with unique title
 def setup_database():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    # Do NOT drop the table — just ensure it exists
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
             imdb_id TEXT PRIMARY KEY,
-            title TEXT,
+            title TEXT UNIQUE,
             imdb_rating REAL
         )
     ''')
     conn.commit()
     conn.close()
+
+# Helper to check for duplicate title
+def is_title_already_stored(title):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT 1 FROM {TABLE_NAME} WHERE title = ?", (title,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
 
 # Get a page of popular movie titles from TMDb
 def fetch_titles_from_tmdb(page=1):
@@ -105,7 +116,7 @@ def store_movie_in_db(movie_data):
 
 # Fetch and store up to 25 NEW movies per execution
 def fetch_and_store_movies():
-    setup_database()
+    setup_database()  # Ensure the database schema is correctly set up
 
     inserted_count = 0
     page = 1
@@ -115,11 +126,17 @@ def fetch_and_store_movies():
     while inserted_count < 25:
         titles = fetch_titles_from_tmdb(page)
         if not titles:
-            break
+            page += 1
+            continue  # Move to next page if nothing returned
 
         for title in titles:
             if inserted_count >= 25:
                 break
+
+            if is_title_already_stored(title):
+                print(f"[=] Skipped duplicate title: '{title}'")
+                continue
+
             movie_data = fetch_movie_data_from_omdb(title)
             if movie_data:
                 was_inserted = store_movie_in_db(movie_data)
@@ -127,14 +144,125 @@ def fetch_and_store_movies():
                     inserted_count += 1
                     print(f"[+]{inserted_count}: Stored '{movie_data['title']}'")
                 else:
-                    print(f"[=] Skipped duplicate: '{movie_data['title']}'")
+                    print(f"[=] Skipped: '{movie_data['title']}' (duplicate imdb_id)")
 
-            time.sleep(1)  # Respect API rate limits
+            time.sleep(0.5)  # Respect API rate limits
 
         page += 1
 
     print(f"[DONE] Inserted {inserted_count} new movie(s) into the database.")
 
-# Run the script
-if __name__ == "__main__":
+def setup_joined_table():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {JOINED_TABLE_NAME} (
+            imdb_id TEXT PRIMARY KEY,
+            title TEXT,
+            imdb_rating REAL,
+            tmdb_id INTEGER,
+            total_revenue INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def create_shared_movies_table():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute('DROP TABLE IF EXISTS shared_movies')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS shared_movies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT UNIQUE
+        )
+    ''')
+
+    cursor.execute(f'''
+        INSERT OR IGNORE INTO shared_movies (title)
+        SELECT DISTINCT omdb.title
+        FROM omdb_movies AS omdb
+        JOIN tmdb_table AS tmdb
+        ON omdb.title = tmdb.title
+    ''')
+
+    conn.commit()
+    conn.close()
+    print("[INFO] shared_movies table created with auto-generated ID and title.")
+
+
+def join_movies():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    create_shared_movies_table()
+
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {JOINED_TABLE_NAME} (
+            title TEXT PRIMARY KEY,
+            imdb_rating REAL,
+            total_revenue INTEGER
+        )
+    ''')
+
+    cursor.execute(f'''
+        INSERT INTO {JOINED_TABLE_NAME} (title, imdb_rating, total_revenue)
+        SELECT omdb.title, omdb.imdb_rating, tmdb.total_revenue
+        FROM shared_movies AS sm
+        JOIN omdb_movies AS omdb ON sm.title = omdb.title
+        JOIN tmdb_table AS tmdb ON sm.title = tmdb.title
+    ''')
+
+    conn.commit()
+    conn.close()
+    print("[INFO] joined_movies table updated with unique movie titles.")
+
+def calculate_average_imdb_rating():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT AVG(imdb_rating) FROM joined_movies")
+    result = cursor.fetchone()
+    conn.close()
+
+    average = result[0] if result else None
+    print(f"[INFO] Average IMDb Rating: {average}")
+    return average
+
+def write_average_to_file(average, filename="average_rating.txt"):
+    with open(filename, "w") as f:
+        f.write(f"Average IMDb Rating: {average:.2f}\n")
+    print(f"[INFO] Average written to {filename}")
+
+def visualize_revenue_vs_rating():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT imdb_rating, total_revenue FROM joined_movies")
+    data = cursor.fetchall()
+    conn.close()
+
+    ratings = [row[0] for row in data]
+    revenue = [row[1] for row in data]
+
+    plt.scatter(ratings, revenue, color='orange')
+    plt.xlabel("IMDb Rating")
+    plt.ylabel("Total Revenue")
+    plt.title("IMDb Rating vs Total Revenue")
+    plt.tight_layout()
+    plt.savefig("revenue_vs_rating.png")
+    plt.show()
+    print("[INFO] Revenue vs Rating Visualization saved and displayed.")
+
+def main():
     fetch_and_store_movies()
+    setup_joined_table()
+    join_movies()
+    average_rating = calculate_average_imdb_rating()
+    write_average_to_file(average_rating)
+    visualize_revenue_vs_rating()
+    print("[INFO] Movies from OMDb and TMDb with overlapping titles have been joined.")
+
+if __name__ == "__main__":
+    main()
