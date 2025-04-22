@@ -154,9 +154,24 @@ def create_correlation_heatmap(df):
     plt.savefig('correlation_heatmap.png')
     plt.show()
 
-# ---------- MAIN ----------
+# ---------- CORRELATION CALCULATION + OUTPUT FILE ----------
+def calculate_and_save_correlation(df, output_file='correlation_output.txt'):
+    # Drop rows with missing data just in case
+    df_clean = df.dropna(subset=['imdb_rating', 'total_revenue'])
+
+    # Calculate Pearson correlation
+    correlation = df_clean['imdb_rating'].corr(df_clean['total_revenue'])
+
+    # Write to file
+    with open(output_file, 'w') as f:
+        f.write(f"Correlation between IMDb rating and total revenue: {correlation:.4f}\n")
+
+    print(f"[INFO] Correlation saved to {output_file}")
+
+
 if __name__ == "__main__":
-    store_tmdb_data()  # Run this to store the movies
-    create_joined_table_with_key()  # Create the joined table with shared integer key
-    df = load_joined_data()  # Load the data into a DataFrame
-    create_correlation_heatmap(df)  # Create the correlation heatmap
+    store_tmdb_data()  # Store data from TMDb API
+    create_joined_table_with_key()  # Create joined table
+    df = load_joined_data()  # Load into DataFrame
+    create_correlation_heatmap(df)  # Plot heatmap
+    calculate_and_save_correlation(df)  # Write correlation to output file
